@@ -1,0 +1,75 @@
+#include <Arduino.h>
+#include <DHT.h>
+#define DHT_PIN 4
+#define BUZZER_PIN 25
+#define DHT_TYPE DHT11
+const float ON_TEMP = 32.0;
+const float OFF_TEMP = 31.0;
+struct SensorData {
+  float temp;
+  float humidity;
+};
+DHT dht(DHT_PIN, DHT_TYPE);
+QueueHandle_t displayQueue;
+QueueHandle_t alertQueue;
+void sensorTask(void *p) {
+  SensorData d;
+  while (true) {
+    d.temp = dht.readTemperature();
+    d.humidity = dht.readHumidity();
+if (!isnan(d.temp) &&
+        !isnan(d.humidity)) {
+          xQueueOverwrite(displayQueue, &d);
+      xQueueOverwrite(alertQueue, &d);
+    }
+    vTaskDelay(pdMS_TO_TICKS(2500));
+  }
+}
+void displayTask(void *p) {
+  SensorData d;
+  while (true) {
+    if (xQueueReceive(displayQueue,
+        &d, portMAX_DELAY) == pdTRUE) {
+      Serial.print("Temp: ");
+      Serial.print(d.temp);
+      Serial.print(" C | Hum: ");
+      Serial.println(d.humidity);
+    }
+  }
+}
+void alertTask(void *p) {
+  SensorData d;
+  bool alarm = false;
+  while (true) {
+    if (xQueueReceive(alertQueue,
+        &d, portMAX_DELAY) == pdTRUE) {
+      if (d.temp > 30) alarm = true;
+      if (d.temp < 29) alarm = false;
+     if (alarm == true) {
+    digitalWrite(BUZZER_PIN, HIGH);
+}
+ else {
+    digitalWrite(BUZZER_PIN, LOW);
+}
+    }
+  }
+}
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+  dht.begin();
+  displayQueue = xQueueCreate(1,
+      sizeof(SensorData));
+  alertQueue = xQueueCreate(1,
+      sizeof(SensorData));
+xTaskCreate(sensorTask, "Sensor",
+      4096, NULL, 2, NULL);
+  xTaskCreate(displayTask, "Display",
+      3072, NULL, 1, NULL);
+  xTaskCreate(alertTask, "Alert",
+      3072, NULL, 3, NULL);
+}
+void loop() {
+  vTaskDelay(pdMS_TO_TICKS(1000));
+}
